@@ -27,6 +27,15 @@ String normalizarTitulo(String titulo) {
   return buffer.toString().trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
+/// Nome de exibição a gravar na versão: null quando vazio ou igual ao
+/// título do jogo (aí vale o título do jogo, e a versão é a "principal").
+String? nomeDeExibicao(String? digitado, String tituloDoJogo) {
+  final t = digitado?.trim();
+  if (t == null || t.isEmpty) return null;
+  if (normalizarTitulo(t) == normalizarTitulo(tituloDoJogo)) return null;
+  return t;
+}
+
 /// Converte o texto digitado em centavos, arredondando para 2 casas.
 ///
 /// Aceita "117,90", "1.234,56", "117.895" (ponto decimal) e "R$ 50".

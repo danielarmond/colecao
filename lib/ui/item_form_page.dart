@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../data/banco.dart';
 import '../data/repositorio.dart';
+import '../domain/notas.dart';
 import '../domain/regras.dart';
 import '../domain/tipos.dart';
 import '../providers.dart';
@@ -43,6 +44,10 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
   /// Coleções marcadas. Na edição, carregadas do banco no initState.
   late Set<String> _colecaoIds;
 
+  /// Sua nota e condição saíram da tela; os valores antigos são mantidos.
+  int? _nota;
+  late bool _zerado;
+
   /// Jogo escolhido na RAWG nesta tela (ainda não gravado).
   RawgJogo? _rawg;
   String? _capaUrl;
@@ -50,11 +55,15 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
 
   bool get _editando => widget.existente != null;
 
+  /// Controla a cor do topo: branca sobre o banner, normal quando recolhido.
+  final _rolagem = ScrollController();
+  bool _bannerRecolhido = false;
+
   @override
   void initState() {
     super.initState();
     final e = widget.existente;
-    _titulo = TextEditingController(text: e?.jogo.titulo ?? '');
+    _titulo = TextEditingController(text: e?.titulo ?? '');
     _ano = TextEditingController(text: e?.ano?.toString() ?? '');
     _valor = TextEditingController(
       text: centavosParaCampo(e?.item.valorCentavos),
@@ -64,7 +73,9 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
     _status = e?.item.status ?? StatusItem.naColecao;
     _condicao = e?.item.condicao;
     _dataChegada = e?.item.dataChegada;
-    _capaUrl = e?.jogo.capaUrl;
+    _capaUrl = e?.capaUrl;
+    _nota = e?.item.nota;
+    _zerado = e?.item.zerado ?? false;
     _rawgIdAtual = e?.jogo.rawgId;
     final vinculos = ref.read(vinculosProvider).value ?? const {};
     _colecaoIds = e != null
@@ -76,7 +87,7 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
     final nome = await pedirNome(
       context,
       titulo: 'Nova coleção',
-      dica: 'Pokémon',
+      dica: 'Nova coleção',
       confirmar: 'Criar',
     );
     if (nome == null) return;
@@ -124,6 +135,7 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
 
   @override
   void dispose() {
+    _rolagem.dispose();
     _titulo.dispose();
     _ano.dispose();
     _valor.dispose();
@@ -138,72 +150,131 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
     final cores = Theme.of(context).colorScheme;
     final e = widget.existente;
 
+    final capa = _capaUrl;
+    // Jogo atualizado do banco (a nota da comunidade pode ter mudado depois
+    // que a tela abriu, ex.: "Atualizar notas da comunidade").
+    var jogoVivo = e?.jogo;
+    if (e != null) {
+      for (final i in ref.watch(itensProvider).value ?? const <ItemDetalhado>[]) {
+        if (i.item.id == e.item.id) jogoVivo = i.jogo;
+      }
+    }
+    final notaComunidade = formatarNotaComunidade(
+      _rawg?.nota ?? jogoVivo?.notaComunidade,
+      _rawg != null ? _rawg!.votos : jogoVivo?.votosComunidade,
+    );
+    final vinculado = _rawg != null || _rawgIdAtual != null;
+    final alturaBanner =
+        (MediaQuery.sizeOf(context).width * 2 / 3).clamp(160.0, 300.0)
+            .toDouble();
+    // Texto branco enquanto o banner está aberto atrás da barra.
+    final sobreBanner = capa != null && !_bannerRecolhido;
+    final estiloTopo = TextButton.styleFrom(
+      foregroundColor: sobreBanner ? Colors.white : null,
+    );
+
+    final acoes = <Widget>[
+      if (e != null && e.item.status == StatusItem.naFila)
+        TextButton(
+          style: estiloTopo,
+          onPressed: () => _mudarStatus(StatusItem.ignorado),
+          child: const Text('Remover da fila'),
+        ),
+      if (e != null && e.item.status == StatusItem.ignorado)
+        TextButton(
+          style: estiloTopo,
+          onPressed: () => _mudarStatus(StatusItem.naFila),
+          child: const Text('Restaurar'),
+        ),
+      if (e != null)
+        IconButton(
+          tooltip: 'Duplicar jogo',
+          icon: const Icon(Icons.copy_all_outlined),
+          onPressed: _duplicar,
+        ),
+      if (e != null)
+        IconButton(
+          tooltip: 'Excluir',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: _excluir,
+        ),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_editando ? 'Editar item' : 'Novo item'),
-        actions: [
-          if (e != null && e.item.status == StatusItem.naFila)
-            TextButton(
-              onPressed: () => _mudarStatus(StatusItem.ignorado),
-              child: const Text('Remover da fila'),
-            ),
-          if (e != null && e.item.status == StatusItem.ignorado)
-            TextButton(
-              onPressed: () => _mudarStatus(StatusItem.naFila),
-              child: const Text('Restaurar'),
-            ),
-          if (e != null)
-            IconButton(
-              tooltip: 'Excluir',
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _excluir,
-            ),
-        ],
-      ),
       body: Form(
         key: _form,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Row(
-              children: [
-                Capa(url: _capaUrl, tamanho: 72),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () => _buscarNaRawg(plataformas),
-                        icon: const Icon(Icons.travel_explore),
-                        label: Text(
-                          _editando
-                              ? (_rawgIdAtual == null && _rawg == null
-                                  ? 'Vincular à RAWG'
-                                  : 'Trocar vínculo RAWG')
-                              : 'Buscar na RAWG',
-                        ),
+        child: NotificationListener<ScrollUpdateNotification>(
+          onNotification: (n) {
+            final recolhido =
+                n.metrics.pixels > alturaBanner - kToolbarHeight - 24;
+            if (recolhido != _bannerRecolhido) {
+              setState(() => _bannerRecolhido = recolhido);
+            }
+            return false;
+          },
+          child: CustomScrollView(
+            controller: _rolagem,
+            slivers: [
+              SliverAppBar(
+                pinned: true,
+                expandedHeight: capa == null ? null : alturaBanner,
+                foregroundColor: sobreBanner ? Colors.white : null,
+                title: e == null
+                    ? const Text('Novo item')
+                    : TituloComMedalha(
+                        titulo: e.titulo,
+                        zerado: _zerado,
+                        tamanhoMedalha: 22,
                       ),
-                      if (_rawg != null)
-                        Text(
-                          'RAWG: ${_rawg!.nome}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        )
-                      else if (_rawgIdAtual == null)
-                        Text(
-                          'Sem vínculo com a RAWG',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+                actions: acoes,
+                flexibleSpace: capa == null
+                    ? null
+                    : FlexibleSpaceBar(background: CapaBanner(url: capa)),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.all(16),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+            OutlinedButton.icon(
+              onPressed: () => _buscarNaRawg(plataformas),
+              icon: const Icon(Icons.travel_explore),
+              label: Text(
+                _editando
+                    ? (_rawgIdAtual == null && _rawg == null
+                        ? 'Vincular à RAWG'
+                        : 'Trocar vínculo RAWG')
+                    : 'Buscar na RAWG',
+              ),
             ),
+            if (_rawg != null)
+              Text(
+                'RAWG: ${_rawg!.nome}',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            else if (_rawgIdAtual == null)
+              Text(
+                'Sem vínculo com a RAWG',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            if (vinculado)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Nota da comunidade (RAWG): '
+                  '${notaComunidade ?? 'sem nota (sem votos ou ainda não '
+                      'atualizada)'}',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _titulo,
-              enabled: !_editando,
-              decoration: const InputDecoration(labelText: 'Título'),
+              decoration: InputDecoration(
+                labelText: _editando ? 'Nome de exibição' : 'Título',
+                helperText: _editando
+                    ? 'Título do jogo: ${e!.jogo.titulo}'
+                    : null,
+              ),
               textCapitalization: TextCapitalization.words,
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Informe o título' : null,
@@ -288,6 +359,15 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
               ],
             ),
             const SizedBox(height: 20),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _zerado,
+              onChanged: (v) => setState(() => _zerado = v ?? false),
+              title: const Text('Zerado'),
+              secondary: _zerado ? const MedalhaZerado(tamanho: 26) : null,
+            ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _valor,
               decoration: const InputDecoration(
@@ -314,18 +394,6 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
               onChanged: (d) => setState(() => _dataChegada = d),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<Condicao?>(
-              initialValue: _condicao,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Condição'),
-              items: [
-                const DropdownMenuItem(value: null, child: Text('Não informada')),
-                for (final c in Condicao.values)
-                  DropdownMenuItem(value: c, child: Text(c.rotulo)),
-              ],
-              onChanged: (v) => setState(() => _condicao = v),
-            ),
-            const SizedBox(height: 12),
             TextFormField(
               controller: _obs,
               decoration: const InputDecoration(labelText: 'Observações'),
@@ -337,7 +405,11 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
               child: Text(_salvando ? 'Salvando…' : 'Salvar'),
             ),
             if (_capaUrl != null) const CreditoRawg(),
-          ],
+                  ]),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -356,7 +428,13 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
     try {
       if (e != null) {
         if (rawg != null) {
-          await repo.vincularRawg(e.jogo.id, rawg.id, rawg.capaUrl);
+          await repo.vincularRawg(
+            e.jogo.id,
+            rawg.id,
+            rawg.capaUrl,
+            notaComunidade: rawg.nota,
+            votosComunidade: rawg.votos,
+          );
         }
         await repo.atualizarItem(
           e,
@@ -366,6 +444,9 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
           dataChegada: _dataChegada,
           condicao: _condicao,
           observacoes: _obs.text,
+          tituloExibicao: _titulo.text,
+          nota: _nota,
+          zerado: _zerado,
         );
         await repo.definirColecoes(e.item.id, _colecaoIds);
       } else {
@@ -381,6 +462,10 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
           colecaoIds: _colecaoIds,
           rawgId: rawg?.id,
           capaUrl: rawg?.capaUrl,
+          notaComunidade: rawg?.nota,
+          votosComunidade: rawg?.votos,
+          nota: _nota,
+          zerado: _zerado,
         );
       }
       if (mounted) Navigator.of(context).pop();
@@ -391,6 +476,33 @@ class _ItemFormPageState extends ConsumerState<ItemFormPage> {
     } finally {
       if (mounted) setState(() => _salvando = false);
     }
+  }
+
+  /// Cria outro item do mesmo jogo e plataforma, com outro nome de
+  /// exibição (ex.: "Pokémon Violet" a partir de "Pokémon Scarlet").
+  Future<void> _duplicar() async {
+    final e = widget.existente!;
+    final nome = await pedirNome(
+      context,
+      titulo: 'Duplicar jogo',
+      inicial: e.titulo,
+      dica: 'Nome de exibição da cópia',
+      confirmar: 'Duplicar',
+    );
+    if (nome == null || !mounted) return;
+    await ref.read(repositorioProvider).duplicarItem(
+          e,
+          nome: nome,
+          colecaoIds: _colecaoIds,
+        );
+    if (!mounted) return;
+    // O aviso aparece na tela da lista, depois de voltar.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('"$nome" criado com o status e as coleções deste item.'),
+      ),
+    );
+    Navigator.of(context).pop();
   }
 
   Future<void> _mudarStatus(StatusItem status) async {

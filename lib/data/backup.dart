@@ -17,6 +17,14 @@ const tabelasBackup = [
   'colecoesItens',
 ];
 
+/// Tabelas que entraram depois (v6, LivingDex). Num backup mais antigo
+/// elas não existem e ficam vazias ao restaurar.
+const tabelasOpcionaisBackup = ['dexRegistros', 'dexAjustes'];
+
+/// Backups a partir desta versão do banco podem ser restaurados. Da v2 em
+/// diante só entraram colunas opcionais, que ficam vazias ao restaurar.
+const versaoMinimaBackup = 2;
+
 typedef ResumoBackup = ({int itens, int colecoes, int jogos, DateTime? geradoEm});
 
 /// Confere se o JSON é um backup deste app e desta versão do banco.
@@ -31,12 +39,15 @@ String? validarBackup(Object? json, {required int versaoEsquema}) {
     return 'Este backup é de uma versão mais nova do app. Atualize o app '
         'antes de restaurar.';
   }
-  if (versao < versaoEsquema) {
+  if (versao < versaoMinimaBackup) {
     return 'Este backup é de uma versão antiga do banco (v$versao) e não '
         'pode ser restaurado nesta versão (v$versaoEsquema).';
   }
   for (final t in tabelasBackup) {
     if (json[t] is! List) return 'Backup incompleto: falta "$t".';
+  }
+  for (final t in tabelasOpcionaisBackup) {
+    if (json[t] != null && json[t] is! List) return 'Backup inválido: "$t".';
   }
   return null;
 }
@@ -80,6 +91,12 @@ class ServicoBackup {
       'colecoesItens': [
         for (final r in await db.select(db.colecoesItens).get()) r.toJson(),
       ],
+      'dexRegistros': [
+        for (final r in await db.select(db.dexRegistros).get()) r.toJson(),
+      ],
+      'dexAjustes': [
+        for (final r in await db.select(db.dexAjustes).get()) r.toJson(),
+      ],
     };
   }
 
@@ -94,7 +111,7 @@ class ServicoBackup {
     if (erro != null) throw FormatException(erro);
 
     List<Map<String, dynamic>> linhas(String t) =>
-        (json[t] as List).cast<Map<String, dynamic>>();
+        ((json[t] as List?) ?? const []).cast<Map<String, dynamic>>();
 
     // Converte tudo antes de apagar: um campo inválido para aqui.
     final plataformas = linhas('plataformas').map(Plataforma.fromJson).toList();
@@ -103,9 +120,13 @@ class ServicoBackup {
     final itens = linhas('itensColecao').map(ItemColecao.fromJson).toList();
     final colecoes = linhas('colecoes').map(Colecao.fromJson).toList();
     final vinculos = linhas('colecoesItens').map(ColecaoItem.fromJson).toList();
+    final dex = linhas('dexRegistros').map(DexRegistro.fromJson).toList();
+    final ajustes = linhas('dexAjustes').map(DexAjuste.fromJson).toList();
 
     await db.transaction(() async {
       // Apaga de quem referencia para quem é referenciado.
+      await db.delete(db.dexAjustes).go();
+      await db.delete(db.dexRegistros).go();
       await db.delete(db.colecoesItens).go();
       await db.delete(db.colecoes).go();
       await db.delete(db.itensColecao).go();
@@ -120,6 +141,8 @@ class ServicoBackup {
         b.insertAll(db.itensColecao, itens);
         b.insertAll(db.colecoes, colecoes);
         b.insertAll(db.colecoesItens, vinculos);
+        b.insertAll(db.dexRegistros, dex);
+        b.insertAll(db.dexAjustes, ajustes);
       });
     });
   }

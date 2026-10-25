@@ -121,7 +121,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     final csv = gerarCsvExportacao([
       for (final i in itens)
         (
-          titulo: i.jogo.titulo,
+          titulo: i.titulo,
           plataforma: i.plataforma.nome,
           ano: i.ano,
           colecoes: [
@@ -134,6 +134,8 @@ class _BackupPageState extends ConsumerState<BackupPage> {
           condicao: i.item.condicao,
           observacoes: i.item.observacoes,
           rawgId: i.jogo.rawgId,
+          nota: i.item.nota,
+          zerado: i.item.zerado,
         ),
     ]);
     // BOM para o Excel reconhecer acentos; o Sheets e a importação ignoram.

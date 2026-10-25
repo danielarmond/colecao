@@ -18,6 +18,8 @@ void main() {
         condicao: Condicao.completo,
         observacoes: 'Caixa amassada, "ok"',
         rawgId: 27057,
+        nota: 9,
+        zerado: true,
       ),
       (
         titulo: "Tingle's Balloon Fight DS",
@@ -30,6 +32,8 @@ void main() {
         condicao: null,
         observacoes: null,
         rawgId: null,
+        nota: null,
+        zerado: false,
       ),
     ];
 
@@ -50,48 +54,53 @@ void main() {
       expect(a.condicao, Condicao.completo);
       expect(a.observacoes, 'Caixa amassada, "ok"');
       expect(a.rawgId, 27057);
+      expect(a.nota, 9);
+      expect(a.zerado, isTrue);
 
       final b = lido.linhas.last;
       expect(b.status, StatusItem.naFila);
       expect(b.colecoes, isEmpty);
       expect(b.valorCentavos, isNull);
       expect(b.rawgId, isNull);
+      expect(b.nota, isNull);
+      expect(b.zerado, isFalse);
     });
 
     test('valores com ponto decimal e campos com vírgula entre aspas', () {
       final csv = gerarCsvExportacao(linhas);
-      expect(csv, contains(',70.00,'));
+      expect(csv, contains(',70.00,2026-06-29,'));
       expect(csv, contains('"Caixa amassada, ""ok"""'));
     });
   });
 
   group('validarBackup', () {
-    Map<String, dynamic> backup({int versao = 2}) => {
+    Map<String, dynamic> backup({int versao = 3}) => {
           'formato': formatoBackup,
           'versaoEsquema': versao,
           'geradoEm': '2026-10-18T03:00:00.000Z',
           for (final t in tabelasBackup) t: <Map<String, dynamic>>[],
         };
 
-    test('aceita backup da mesma versão', () {
-      expect(validarBackup(backup(), versaoEsquema: 2), isNull);
+    test('aceita backup da mesma versão e da v2', () {
+      expect(validarBackup(backup(), versaoEsquema: 3), isNull);
+      expect(validarBackup(backup(versao: 2), versaoEsquema: 3), isNull);
     });
 
     test('recusa arquivo que não é backup', () {
-      expect(validarBackup({'a': 1}, versaoEsquema: 2), isNotNull);
-      expect(validarBackup([1, 2], versaoEsquema: 2), isNotNull);
+      expect(validarBackup({'a': 1}, versaoEsquema: 3), isNotNull);
+      expect(validarBackup([1, 2], versaoEsquema: 3), isNotNull);
     });
 
     test('recusa versão diferente', () {
-      expect(validarBackup(backup(versao: 3), versaoEsquema: 2),
+      expect(validarBackup(backup(versao: 4), versaoEsquema: 3),
           contains('mais nova'));
-      expect(validarBackup(backup(versao: 1), versaoEsquema: 2),
+      expect(validarBackup(backup(versao: 1), versaoEsquema: 3),
           contains('antiga'));
     });
 
     test('recusa backup incompleto', () {
       final b = backup()..remove('colecoes');
-      expect(validarBackup(b, versaoEsquema: 2), contains('colecoes'));
+      expect(validarBackup(b, versaoEsquema: 3), contains('colecoes'));
     });
 
     test('resumo conta só o que não foi excluído', () {

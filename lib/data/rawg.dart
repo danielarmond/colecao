@@ -24,6 +24,8 @@ class RawgJogo {
     required this.plataformas,
     this.ano,
     this.capaUrl,
+    this.nota,
+    this.votos,
   });
 
   factory RawgJogo.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,8 @@ class RawgJogo {
       ano: _ano(json['released'] as String?),
       capaUrl: capaReduzida(json['background_image'] as String?),
       plataformas: plataformas,
+      nota: (json['rating'] as num?)?.toDouble(),
+      votos: json['ratings_count'] as int?,
     );
   }
 
@@ -54,6 +58,10 @@ class RawgJogo {
   final int? ano;
   final String? capaUrl;
   final List<RawgPlataforma> plataformas;
+
+  /// Nota dos usuários da RAWG (0 a 5; 0 quando ninguém votou) e votos.
+  final double? nota;
+  final int? votos;
 
   /// Ano nesta plataforma da RAWG; se não houver, o ano geral do jogo.
   int? anoEm(int? rawgPlataformaId) {

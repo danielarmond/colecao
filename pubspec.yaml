@@ -24,6 +24,9 @@ dependencies:
   file_picker: ^13.1.0
   http: ^1.6.0
   cached_network_image: ^4.0.4
+  # Carga por print da LivingDex
+  image: ^4.3.0
+  image_picker: ^1.1.2
   url_launcher: ^6.3.3
 
 dev_dependencies:
@@ -35,3 +38,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/inicio/
+    - assets/livingdex/
+    - assets/livingdex/miniaturas/

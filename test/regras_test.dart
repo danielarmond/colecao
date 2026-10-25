@@ -19,6 +19,20 @@ void main() {
     });
   });
 
+  group('nomeDeExibicao', () {
+    const jogo = 'Pokémon Scarlet and Violet';
+
+    test('nome diferente do jogo vira nome próprio da versão', () {
+      expect(nomeDeExibicao('  Pokémon Violet ', jogo), 'Pokémon Violet');
+    });
+
+    test('vazio ou igual ao jogo (ignorando acentos) usa o título do jogo', () {
+      expect(nomeDeExibicao(null, jogo), isNull);
+      expect(nomeDeExibicao('   ', jogo), isNull);
+      expect(nomeDeExibicao('pokemon scarlet and violet', jogo), isNull);
+    });
+  });
+
   group('lerValorCentavos', () {
     test('formato brasileiro', () {
       expect(lerValorCentavos('117,90'), 11790);

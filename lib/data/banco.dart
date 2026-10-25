@@ -41,6 +41,10 @@ class Jogos extends Table {
   TextColumn get capaUrl => text().nullable()();
   TextColumn get capaLocal => text().nullable()();
   TextColumn get origem => textEnum<OrigemJogo>()();
+
+  /// Nota dos usuários da RAWG (0 a 5) e quantos votaram.
+  RealColumn get notaComunidade => real().nullable()();
+  IntColumn get votosComunidade => integer().nullable()();
   DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get excluidoEm => dateTime().nullable()();
@@ -50,6 +54,9 @@ class Jogos extends Table {
 }
 
 /// Um jogo em uma plataforma: a unidade que se coleciona.
+/// O mesmo jogo pode ter mais de uma versão na mesma plataforma quando a
+/// RAWG junta jogos que você trata como itens separados (ex.: Pokémon
+/// Scarlet e Violet). Elas se distinguem pelo nome de exibição ([titulo]).
 @DataClassName('Versao')
 class Versoes extends Table {
   TextColumn get id => text().clientDefault(() => _uuid.v4())();
@@ -57,17 +64,15 @@ class Versoes extends Table {
   TextColumn get plataformaId => text().references(Plataformas, #id)();
   IntColumn get anoLancamento => integer().nullable()();
   TextColumn get capaUrl => text().nullable()();
+
+  /// Nome de exibição. Nulo = usa o título do jogo.
+  TextColumn get titulo => text().nullable()();
   DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get excluidoEm => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
-
-  @override
-  List<Set<Column>> get uniqueKeys => [
-        {jogoId, plataformaId},
-      ];
 }
 
 /// Uma aba da tela inicial (ex.: "Zelda", "Pokémon"). Substitui a antiga
@@ -79,6 +84,9 @@ class Colecoes extends Table {
 
   /// Jogo da RAWG usado como base da série na adição em lote (opcional).
   IntColumn get rawgJogoSemente => integer().nullable()();
+
+  /// Imagem de fundo do resumo da aba (capa de um jogo da coleção).
+  TextColumn get capaUrl => text().nullable()();
   DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
   DateTimeColumn get excluidoEm => dateTime().nullable()();
@@ -107,6 +115,14 @@ class ItensColecao extends Table {
   TextColumn get versaoId => text().references(Versoes, #id).unique()();
   TextColumn get status => textEnum<StatusItem>()();
   IntColumn get valorCentavos => integer().nullable()();
+
+  /// Valor de mercado estimado. Recurso pausado: não aparece no app.
+  IntColumn get valorMercadoCentavos => integer().nullable()();
+
+  /// Sua nota, de 0 a 10. Exibida como número ou tier (SS a E), conforme a
+  /// preferência.
+  IntColumn get nota => integer().nullable()();
+  BoolColumn get zerado => boolean().withDefault(const Constant(false))();
   TextColumn get moeda => text().withDefault(const Constant('BRL'))();
 
   /// Real (Na Coleção) ou prevista (Aguardando).
@@ -121,16 +137,98 @@ class ItensColecao extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// LivingDex: um Pokémon que você tem, em regular ou shiny. O catálogo
+/// (espécies, formas, tipos) vem do arquivo embutido no app, não do banco;
+/// [pokemonId] é o id da PokéAPI. Tirar da coleção = exclusão lógica.
+@DataClassName('DexRegistro')
+class DexRegistros extends Table {
+  TextColumn get id => text().clientDefault(() => _uuid.v4())();
+  IntColumn get pokemonId => integer()();
+  BoolColumn get shiny => boolean()();
+  DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get excluidoEm => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {pokemonId, shiny},
+      ];
+}
+
+/// LivingDex: ajustes seus sobre o catálogo (ex.: shiny disponível ou não).
+@DataClassName('DexAjuste')
+class DexAjustes extends Table {
+  IntColumn get pokemonId => integer()();
+  BoolColumn get shinyBloqueado => boolean()();
+  DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get excluidoEm => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {pokemonId};
+}
+
+/// LivingDex: espaço de um print que ficou para validar depois (não
+/// reconhecido, ou reconhecido e removido na revisão). Guarda o recorte.
+/// Não entra no backup.
+@DataClassName('DexPendencia')
+class DexPendencias extends Table {
+  TextColumn get id => text().clientDefault(() => _uuid.v4())();
+  BlobColumn get recorte => blob()();
+  BoolColumn get shiny => boolean()();
+
+  /// Pokémon que o app sugeriu (esperado na caixa ou reconhecido).
+  IntColumn get sugestaoId => integer().nullable()();
+
+  /// De onde veio, ex.: "Dex 796-810 · linha 1, coluna 3".
+  TextColumn get origem => text()();
+  DateTimeColumn get criadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get atualizadoEm => dateTime().clientDefault(agoraUtc)();
+  DateTimeColumn get excluidoEm => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Preferências do app (chave/valor). Não entram no backup.
+@DataClassName('Preferencia')
+class Preferencias extends Table {
+  TextColumn get chave => text()();
+  TextColumn get valor => text()();
+
+  @override
+  Set<Column> get primaryKey => {chave};
+}
+
 @DriftDatabase(
-  tables: [Plataformas, Jogos, Versoes, ItensColecao, Colecoes, ColecoesItens],
+  tables: [
+    Plataformas,
+    Jogos,
+    Versoes,
+    ItensColecao,
+    Colecoes,
+    ColecoesItens,
+    Preferencias,
+    DexRegistros,
+    DexAjustes,
+    DexPendencias,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ?? driftDatabase(name: 'colecao'));
 
   /// v1: franquias ligadas a jogos. v2: coleções ligadas a itens.
+  /// v3: nome de exibição na versão; jogo + plataforma pode se repetir.
+  /// v4: capa da coleção e valor de mercado do item.
+  /// v5: nota da comunidade, sua nota, zerado e preferências.
+  /// v6: LivingDex (registros e ajustes).
+  /// v7: LivingDex, lista "Aguardando validação".
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -140,6 +238,31 @@ class AppDatabase extends _$AppDatabase {
         },
         onUpgrade: (m, de, para) async {
           if (de < 2) await _migrarFranquiasParaColecoes(m);
+          if (de < 3) {
+            // Recria a tabela sem a regra "um por jogo e plataforma" e com
+            // a coluna nova; os dados são copiados pelo Drift.
+            await m.alterTable(
+              TableMigration(versoes, newColumns: [versoes.titulo]),
+            );
+          }
+          if (de < 4) {
+            await m.addColumn(itensColecao, itensColecao.valorMercadoCentavos);
+            // Vindo da v1, a tabela de coleções acabou de ser criada já com
+            // a coluna nova; só a v2 e a v3 precisam dela.
+            if (de >= 2) await m.addColumn(colecoes, colecoes.capaUrl);
+          }
+          if (de < 5) {
+            await m.addColumn(jogos, jogos.notaComunidade);
+            await m.addColumn(jogos, jogos.votosComunidade);
+            await m.addColumn(itensColecao, itensColecao.nota);
+            await m.addColumn(itensColecao, itensColecao.zerado);
+            await m.createTable(preferencias);
+          }
+          if (de < 6) {
+            await m.createTable(dexRegistros);
+            await m.createTable(dexAjustes);
+          }
+          if (de < 7) await m.createTable(dexPendencias);
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');

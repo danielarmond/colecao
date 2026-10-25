@@ -1,10 +1,12 @@
 import 'package:drift/drift.dart';
 
 import '../domain/importacao_csv.dart';
+import '../domain/notas.dart';
 import '../domain/regras.dart';
 import '../domain/tipos.dart';
 import 'banco.dart';
 import 'lote.dart';
+import 'rawg.dart';
 
 /// Um item da coleção com o jogo e a plataforma já resolvidos.
 class ItemDetalhado {
@@ -22,9 +24,23 @@ class ItemDetalhado {
 
   /// Ano na plataforma; se não houver, o ano do jogo.
   int? get ano => versao.anoLancamento ?? jogo.ano;
+
+  /// Nome de exibição: o da versão (ex.: "Pokémon Violet") ou o do jogo.
+  String get titulo => versao.titulo ?? jogo.titulo;
+
+  /// Capa da versão, se tiver uma própria; senão, a do jogo.
+  String? get capaUrl => versao.capaUrl ?? jogo.capaUrl;
 }
 
 typedef ResultadoLote = ({int naFila, int ignorados, int incluidos});
+
+/// Resultado de "Atualizar notas da comunidade".
+typedef ResultadoNotas = ({
+  int total,
+  int atualizados,
+  int comNota,
+  String? erro,
+});
 
 class ResultadoImportacao {
   const ResultadoImportacao(this.importados, this.duplicados, this.erros);
@@ -129,6 +145,16 @@ class Repositorio {
     );
   }
 
+  /// Capa da aba (fundo do resumo). Null remove.
+  Future<void> definirCapaColecao(String id, String? capaUrl) {
+    return (db.update(db.colecoes)..where((c) => c.id.equals(id))).write(
+      ColecoesCompanion(
+        capaUrl: Value(capaUrl),
+        atualizadoEm: Value(agoraUtc()),
+      ),
+    );
+  }
+
   /// Exclui a aba. Os itens continuam no app (na aba Todos e nas outras).
   Future<void> excluirColecao(String id) {
     final agora = agoraUtc();
@@ -224,6 +250,8 @@ class Repositorio {
           colecaoIds: {colecaoId},
           rawgId: c.jogo.id,
           capaUrl: c.jogo.capaUrl,
+          notaComunidade: c.jogo.nota,
+          votosComunidade: c.jogo.votos,
         );
         ignorar ? ignorados++ : naFila++;
       } on ItemDuplicadoException {
@@ -244,12 +272,18 @@ class Repositorio {
     int? ano,
     required StatusItem status,
     int? valorCentavos,
+    int? valorMercadoCentavos,
     DateTime? dataChegada,
     Condicao? condicao,
     String? observacoes,
     Set<String> colecaoIds = const {},
     int? rawgId,
     String? capaUrl,
+    double? notaComunidade,
+    int? votosComunidade,
+    String? tituloExibicao,
+    int? nota,
+    bool zerado = false,
   }) {
     return db.transaction(() async {
       final jogo = await _encontrarOuCriarJogo(
@@ -257,20 +291,27 @@ class Repositorio {
         ano: ano,
         rawgId: rawgId,
         capaUrl: capaUrl,
+        notaComunidade: notaComunidade,
+        votosComunidade: votosComunidade,
       );
 
+      // Versão "principal" (sem nome próprio) ou a que tem esse nome.
+      final nome = nomeDeExibicao(tituloExibicao, jogo.titulo);
       final versao = await (db.select(db.versoes)
                 ..where(
                   (v) =>
                       v.jogoId.equals(jogo.id) &
-                      v.plataformaId.equals(plataforma.id),
-                ))
+                      v.plataformaId.equals(plataforma.id) &
+                      (nome == null ? v.titulo.isNull() : v.titulo.equals(nome)),
+                )
+                ..limit(1))
               .getSingleOrNull() ??
           await db.into(db.versoes).insertReturning(
                 VersoesCompanion.insert(
                   jogoId: jogo.id,
                   plataformaId: plataforma.id,
                   anoLancamento: Value(ano),
+                  titulo: Value(nome),
                 ),
               );
 
@@ -279,15 +320,18 @@ class Repositorio {
           .getSingleOrNull();
 
       if (existente != null && existente.excluidoEm == null) {
-        throw ItemDuplicadoException(jogo.titulo, plataforma.nome);
+        throw ItemDuplicadoException(nome ?? jogo.titulo, plataforma.nome);
       }
 
       final dados = ItensColecaoCompanion(
         status: Value(status),
         valorCentavos: Value(valorCentavos),
+        valorMercadoCentavos: Value(valorMercadoCentavos),
         dataChegada: Value(dataChegada),
         condicao: Value(condicao),
         observacoes: Value(_vazioParaNulo(observacoes)),
+        nota: Value(nota),
+        zerado: Value(zerado),
       );
 
       final String itemId;
@@ -319,6 +363,8 @@ class Repositorio {
     int? ano,
     int? rawgId,
     String? capaUrl,
+    double? notaComunidade,
+    int? votosComunidade,
   }) async {
     final busca = normalizarTitulo(titulo);
 
@@ -327,7 +373,16 @@ class Repositorio {
             ..where((j) => j.rawgId.equals(rawgId) & j.excluidoEm.isNull())
             ..limit(1))
           .getSingleOrNull();
-      if (porRawg != null) return porRawg;
+      if (porRawg != null) {
+        if (notaComunidade != null) {
+          await gravarNotaComunidade(
+            porRawg.id,
+            notaComunidade,
+            votosComunidade,
+          );
+        }
+        return porRawg;
+      }
     }
 
     final porTitulo = await (db.select(db.jogos)
@@ -343,7 +398,13 @@ class Repositorio {
         .getSingleOrNull();
     if (porTitulo != null) {
       if (rawgId != null && porTitulo.rawgId == null) {
-        await _gravarVinculo(porTitulo.id, rawgId, capaUrl);
+        await _gravarVinculo(
+          porTitulo.id,
+          rawgId,
+          capaUrl,
+          notaComunidade,
+          votosComunidade,
+        );
         return (await (db.select(db.jogos)
                   ..where((j) => j.id.equals(porTitulo.id)))
                 .getSingle());
@@ -358,6 +419,8 @@ class Repositorio {
             ano: Value(ano),
             rawgId: Value(rawgId),
             capaUrl: Value(capaUrl),
+            notaComunidade: Value(notaComunidade),
+            votosComunidade: Value(votosComunidade),
             origem: rawgId == null ? OrigemJogo.manual : OrigemJogo.rawg,
           ),
         );
@@ -365,18 +428,110 @@ class Repositorio {
 
   /// Liga um jogo já cadastrado (ex.: importado da planilha) a um jogo da
   /// RAWG. Mantém o título que você usa; traz o id e a capa.
-  Future<void> vincularRawg(String jogoId, int rawgId, String? capaUrl) =>
-      _gravarVinculo(jogoId, rawgId, capaUrl);
+  Future<void> vincularRawg(
+    String jogoId,
+    int rawgId,
+    String? capaUrl, {
+    double? notaComunidade,
+    int? votosComunidade,
+  }) =>
+      _gravarVinculo(jogoId, rawgId, capaUrl, notaComunidade, votosComunidade);
 
-  Future<void> _gravarVinculo(String jogoId, int rawgId, String? capaUrl) {
+  Future<void> _gravarVinculo(
+    String jogoId,
+    int rawgId,
+    String? capaUrl,
+    double? notaComunidade,
+    int? votosComunidade,
+  ) {
     return (db.update(db.jogos)..where((j) => j.id.equals(jogoId))).write(
       JogosCompanion(
         rawgId: Value(rawgId),
         capaUrl: Value(capaUrl),
+        notaComunidade: Value(notaComunidade),
+        votosComunidade: Value(votosComunidade),
         origem: const Value(OrigemJogo.rawg),
         atualizadoEm: Value(agoraUtc()),
       ),
     );
+  }
+
+  Future<void> gravarNotaComunidade(String jogoId, double? nota, int? votos) {
+    return (db.update(db.jogos)..where((j) => j.id.equals(jogoId))).write(
+      JogosCompanion(
+        notaComunidade: Value(nota),
+        votosComunidade: Value(votos),
+        atualizadoEm: Value(agoraUtc()),
+      ),
+    );
+  }
+
+  /// Busca na RAWG a nota da comunidade de cada jogo vinculado, um por vez.
+  /// Jogos que falharem são pulados; o último erro volta no resultado.
+  Future<ResultadoNotas> atualizarNotasComunidade(
+    RawgCliente rawg, {
+    void Function(int feitos, int total)? progresso,
+  }) async {
+    final jogos = await (db.select(db.jogos)
+          ..where((j) => j.rawgId.isNotNull() & j.excluidoEm.isNull()))
+        .get();
+    var atualizados = 0;
+    var comNota = 0;
+    String? erro;
+    for (final (i, j) in jogos.indexed) {
+      progresso?.call(i, jogos.length);
+      try {
+        final r = await rawg.detalhes(j.rawgId!);
+        await gravarNotaComunidade(j.id, r.nota, r.votos);
+        atualizados++;
+        if ((r.nota ?? 0) > 0) comNota++;
+      } on RawgErro catch (e) {
+        // Sem conexão ou jogo removido da RAWG: segue para o próximo.
+        erro = e.mensagem;
+      } catch (e) {
+        erro = '$e';
+      }
+    }
+    progresso?.call(jogos.length, jogos.length);
+    return (
+      total: jogos.length,
+      atualizados: atualizados,
+      comNota: comNota,
+      erro: erro,
+    );
+  }
+
+  // ------------------------------------------------------------ preferências
+
+  Stream<EscalaNota> observarEscalaNota() {
+    final q = db.select(db.preferencias)
+      ..where((p) => p.chave.equals('escala_nota'));
+    return q.watchSingleOrNull().map((p) => EscalaNota.deTexto(p?.valor));
+  }
+
+  /// Capa da aba "Todos" (URL de uma capa de jogo), nas preferências.
+  Stream<String?> observarCapaTodos() {
+    final q = db.select(db.preferencias)
+      ..where((p) => p.chave.equals('capa_todos'));
+    return q.watchSingleOrNull().map((p) => p?.valor);
+  }
+
+  Future<void> definirCapaTodos(String? url) async {
+    if (url == null) {
+      await (db.delete(db.preferencias)
+            ..where((p) => p.chave.equals('capa_todos')))
+          .go();
+      return;
+    }
+    await db.into(db.preferencias).insertOnConflictUpdate(
+          PreferenciasCompanion.insert(chave: 'capa_todos', valor: url),
+        );
+  }
+
+  Future<void> definirEscalaNota(EscalaNota escala) {
+    return db.into(db.preferencias).insertOnConflictUpdate(
+          PreferenciasCompanion.insert(chave: 'escala_nota', valor: escala.name),
+        );
   }
 
   Future<void> atualizarItem(
@@ -384,20 +539,38 @@ class Repositorio {
     required int? ano,
     required StatusItem status,
     required int? valorCentavos,
+    int? valorMercadoCentavos,
     required DateTime? dataChegada,
     required Condicao? condicao,
     required String? observacoes,
+    String? tituloExibicao,
+    int? nota,
+    bool? zerado,
   }) {
     return db.transaction(() async {
+      final nome = nomeDeExibicao(tituloExibicao, atual.jogo.titulo);
+      if (tituloExibicao != null && nome != atual.versao.titulo) {
+        await (db.update(db.versoes)
+              ..where((v) => v.id.equals(atual.versao.id)))
+            .write(
+          VersoesCompanion(titulo: Value(nome), atualizadoEm: Value(agoraUtc())),
+        );
+      }
       await (db.update(db.itensColecao)
             ..where((i) => i.id.equals(atual.item.id)))
           .write(
         ItensColecaoCompanion(
           status: Value(status),
           valorCentavos: Value(valorCentavos),
+          // Recurso pausado: só grava se vier um valor (não apaga o que há).
+          valorMercadoCentavos: valorMercadoCentavos == null
+              ? const Value.absent()
+              : Value(valorMercadoCentavos),
           dataChegada: Value(dataChegada),
           condicao: Value(condicao),
           observacoes: Value(_vazioParaNulo(observacoes)),
+          nota: Value(nota),
+          zerado: zerado == null ? const Value.absent() : Value(zerado),
           atualizadoEm: Value(agoraUtc()),
         ),
       );
@@ -411,6 +584,35 @@ class Repositorio {
           ),
         );
       }
+    });
+  }
+
+  /// "Duplicar jogo": nova versão do mesmo jogo na mesma plataforma, com
+  /// outro nome de exibição (ex.: Scarlet e Violet, que a RAWG junta).
+  /// O item novo herda status e coleções; valor e datas ficam em branco.
+  Future<String> duplicarItem(
+    ItemDetalhado original, {
+    required String nome,
+    required Set<String> colecaoIds,
+  }) {
+    return db.transaction(() async {
+      final versao = await db.into(db.versoes).insertReturning(
+            VersoesCompanion.insert(
+              jogoId: original.jogo.id,
+              plataformaId: original.plataforma.id,
+              anoLancamento: Value(original.versao.anoLancamento),
+              capaUrl: Value(original.versao.capaUrl),
+              titulo: Value(nome.trim()),
+            ),
+          );
+      final item = await db.into(db.itensColecao).insertReturning(
+            ItensColecaoCompanion.insert(
+              versaoId: versao.id,
+              status: original.item.status,
+            ),
+          );
+      await incluirEmColecoes(item.id, colecaoIds);
+      return item.id;
     });
   }
 
@@ -482,11 +684,17 @@ class Repositorio {
           ano: l.ano,
           status: l.status,
           valorCentavos: l.valorCentavos,
+          valorMercadoCentavos: l.valorMercadoCentavos,
           dataChegada: l.dataChegada,
           condicao: l.condicao,
           observacoes: l.observacoes,
           colecaoIds: ids,
           rawgId: l.rawgId,
+          // Com id da RAWG, o título do CSV é o nome de exibição: assim
+          // "Pokémon Scarlet" e "Pokémon Violet" voltam como dois itens.
+          tituloExibicao: l.rawgId != null ? l.titulo : null,
+          nota: l.nota,
+          zerado: l.zerado,
         );
         importados++;
       } on ItemDuplicadoException {

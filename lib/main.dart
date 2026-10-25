@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'ui/colecao_page.dart';
+import 'ui/inicio_page.dart';
 
 void main() {
   runApp(const ProviderScope(child: ColecaoApp()));
@@ -15,7 +15,7 @@ class ColecaoApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const semente = Color(0xFF2E6B3F);
     return MaterialApp(
-      title: 'Coleção',
+      title: 'DXA Coleções',
       debugShowCheckedModeBanner: false,
       locale: const Locale('pt', 'BR'),
       supportedLocales: const [Locale('pt', 'BR')],
@@ -31,7 +31,7 @@ class ColecaoApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const ColecaoPage(),
+      home: const InicioPage(),
     );
   }
 }

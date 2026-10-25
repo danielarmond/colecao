@@ -1,8 +1,12 @@
-# Coleção
+# DXA Coleções
 
-App Android (Flutter) para acompanhar uma coleção de jogos: status de cada
-item, valor pago, coleções em abas (ex.: Zelda, Pokémon), progresso por aba
-e wishlist ("Na Fila") com adição em lote a partir da RAWG.
+App Android (Flutter) com duas seções, escolhidas na tela inicial:
+
+- **Mídia Física:** coleção de jogos com status de cada item, valor pago,
+  coleções em abas (ex.: Zelda, Pokémon), progresso por aba e wishlist
+  ("Na Fila") com adição em lote a partir da RAWG.
+- **LivingDex:** living dex regular e shiny do Pokémon HOME, com formas
+  regionais, em lista (ordem da Pokédex) ou em caixas.
 
 Decisões, modelo de dados e roadmap: documento "Projeto Coleção — Modelo de
 Dados e Roadmap do MVP".
@@ -17,8 +21,15 @@ Dados e Roadmap do MVP".
 - **Adição em lote à Wishlist:** por nome ou pela série de um jogo-base,
   filtrando plataformas e anos. Desmarcados viram Ignorado; o que você já
   tem só entra na coleção.
-- **Backup e planilha:** backup completo (.json) e restauração; exportação e
-  importação de planilha (.csv).
+- **Backup e planilha:** backup completo (.json, inclui a LivingDex) e
+  restauração; exportação e importação de planilha (.csv).
+- **LivingDex:** lista com miniatura colorida (tenho) ou em preto e branco
+  (falta), filtros de variante, posse, tipo e jogo de destino; caixas do
+  HOME em grade 6 × 5 (15 Pokémon por caixa, regular à esquerda e shiny à
+  direita); tela do Pokémon com dados e links para Serebii e Bulbapedia.
+- **Carga por print:** prints das caixas do HOME (Switch) escolhidos na
+  galeria; cada caixa "Dex X-Y" é reconhecida pelo conteúdo e os espaços
+  duvidosos ficam marcados para conferir antes de salvar.
 
 ## Configuração (uma vez)
 
@@ -71,13 +82,28 @@ lib/
     importacao_csv.dart     Leitura do CSV
     exportacao_csv.dart     Geração do CSV
   data/
-    banco.dart              Tabelas Drift (schema v2) e migração
-    repositorio.dart        Consultas e operações
+    banco.dart              Tabelas Drift (schema v6) e migrações
+    repositorio.dart        Consultas e operações (Mídia Física)
+    repositorio_dex.dart    Consultas e operações (LivingDex)
     rawg.dart               Cliente da API da RAWG
     lote.dart               Candidatos da adição em lote
     backup.dart             Backup JSON e restauração
-  ui/                       Telas
-test/                       Testes (regras, CSV, RAWG, lote, backup)
+  livingdex/
+    catalogo.dart           Catálogo, caixas, filtros e progresso
+    leitor_caixa.dart       Leitura dos prints das caixas do HOME
+  ui/                       Telas (livingdex/ para a LivingDex)
+assets/
+  inicio/                   Imagens da tela inicial
+  livingdex/                catalogo.json, miniaturas e modelos.bin (gerados)
+tool/livingdex/             Scripts que geram o catálogo e as miniaturas
+test/                       Testes (regras, CSV, RAWG, lote, backup, dex)
+  fixtures/home/            Prints de caixas do HOME (carga por imagem)
 ```
 
-Dados e imagens de jogos: [RAWG](https://rawg.io).
+O catálogo da LivingDex é gerado uma vez e embutido no app; para atualizar
+(novos Pokémon ou formas), rode os scripts de `tool/livingdex/` na ordem
+catálogo, miniaturas, modelos, e substitua os arquivos em
+`assets/livingdex/`.
+
+Dados e imagens de jogos: [RAWG](https://rawg.io). Dados e imagens de
+Pokémon: [PokéAPI](https://pokeapi.co).

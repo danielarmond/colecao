@@ -1,3 +1,4 @@
+import 'notas.dart';
 import 'regras.dart';
 import 'tipos.dart';
 
@@ -11,10 +12,13 @@ class LinhaImportacao {
     this.ano,
     this.colecoes = const [],
     this.valorCentavos,
+    this.valorMercadoCentavos,
     this.dataChegada,
     this.condicao,
     this.observacoes,
     this.rawgId,
+    this.nota,
+    this.zerado = false,
   });
 
   final int numero; // linha no arquivo, para mensagens de erro
@@ -27,10 +31,15 @@ class LinhaImportacao {
   /// separadas por "|".
   final List<String> colecoes;
   final int? valorCentavos;
+  final int? valorMercadoCentavos;
   final DateTime? dataChegada;
   final Condicao? condicao;
   final String? observacoes;
   final int? rawgId;
+
+  /// Sua nota de 0 a 10 (no CSV: número ou tier SS a E).
+  final int? nota;
+  final bool zerado;
 }
 
 class ErroImportacao {
@@ -82,10 +91,13 @@ ResultadoLeitura lerCsvImportacao(String conteudo) {
   // "franquia" (planilha antiga) ou "colecao": vira uma coleção (aba).
   final cFranquia = col('franquia') ?? col('colecao');
   final cValor = col('valor pago') ?? col('valor');
+  final cMercado = col('valor mercado');
   final cData = col('data chegada') ?? col('data');
   final cCondicao = col('condicao');
   final cObs = col('observacoes');
   final cRawg = col('rawg id');
+  final cNota = col('nota');
+  final cZerado = col('zerado');
 
   final linhas = <LinhaImportacao>[];
   final erros = <ErroImportacao>[];
@@ -129,8 +141,10 @@ ResultadoLeitura lerCsvImportacao(String conteudo) {
     }
 
     int? valor;
+    int? mercado;
     try {
       valor = lerValorCentavos(campo(cValor) ?? '');
+      mercado = lerValorCentavos(campo(cMercado) ?? '');
     } on FormatException {
       erros.add(ErroImportacao(numero, 'valor inválido ($titulo)'));
       continue;
@@ -167,10 +181,14 @@ ResultadoLeitura lerCsvImportacao(String conteudo) {
             if (c.trim().isNotEmpty) c.trim(),
         ],
         valorCentavos: valor,
+        valorMercadoCentavos: mercado,
         dataChegada: data,
         condicao: condicao,
         observacoes: campo(cObs),
         rawgId: int.tryParse(campo(cRawg) ?? ''),
+        nota: lerNota(campo(cNota)),
+        zerado: const {'sim', 's', 'x', '1', 'true'}
+            .contains(normalizarTitulo(campo(cZerado) ?? '')),
       ),
     );
   }

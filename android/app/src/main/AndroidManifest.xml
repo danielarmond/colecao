@@ -2,7 +2,7 @@
     <!-- Busca de jogos e capas na RAWG -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Coleção"
+        android:label="DXA Coleções"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

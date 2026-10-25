@@ -12,6 +12,8 @@ typedef LinhaExportacao = ({
   Condicao? condicao,
   String? observacoes,
   int? rawgId,
+  int? nota,
+  bool zerado,
 });
 
 /// Mesmo formato da importação (colecao_importacao.csv), com colunas extras
@@ -20,7 +22,7 @@ typedef LinhaExportacao = ({
 String gerarCsvExportacao(Iterable<LinhaExportacao> linhas) {
   final b = StringBuffer()
     ..write('titulo,plataforma,ano,colecao,status,valor_pago,data_chegada,'
-        'condicao,observacoes,rawg_id\r\n');
+        'condicao,observacoes,rawg_id,nota,zerado\r\n');
   for (final l in linhas) {
     final campos = [
       l.titulo,
@@ -33,6 +35,8 @@ String gerarCsvExportacao(Iterable<LinhaExportacao> linhas) {
       l.condicao?.rotulo ?? '',
       l.observacoes ?? '',
       l.rawgId?.toString() ?? '',
+      l.nota?.toString() ?? '',
+      l.zerado ? 'sim' : '',
     ];
     b
       ..write(campos.map(_escapar).join(','))

@@ -9,6 +9,8 @@ void main() {
       'released': '2006-11-19',
       'background_image':
           'https://media.rawg.io/media/games/abc/abc123.jpg',
+      'rating': 4.38,
+      'ratings_count': 501,
       'platforms': [
         {
           'platform': {'id': 105, 'name': 'GameCube'},
@@ -29,6 +31,8 @@ void main() {
     expect(j.anoEm(105), 2006);
     expect(j.anoEm(11), 2006); // sem data na plataforma: usa a do jogo
     expect(j.anoEm(null), 2006);
+    expect(j.nota, 4.38);
+    expect(j.votos, 501);
   });
 
   test('campos ausentes não quebram', () {

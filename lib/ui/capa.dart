@@ -46,6 +46,42 @@ class Capa extends StatelessWidget {
   }
 }
 
+/// Capa ocupando a largura da tela, no topo da tela do item. Um degradê
+/// escuro no alto deixa legíveis o título e os botões sobre a imagem.
+class CapaBanner extends StatelessWidget {
+  const CapaBanner({super.key, required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final cores = Theme.of(context).colorScheme;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: (_, _) => ColoredBox(color: cores.surfaceContainerHighest),
+          errorWidget: (_, _, _) => ColoredBox(
+            color: cores.surfaceContainerHighest,
+            child: Icon(Icons.videogame_asset_outlined, color: cores.outline),
+          ),
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.center,
+              colors: [Color(0x99000000), Color(0x00000000)],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Crédito exigido pelos termos da RAWG nas telas que usam seus dados.
 class CreditoRawg extends StatelessWidget {
   const CreditoRawg({super.key});
