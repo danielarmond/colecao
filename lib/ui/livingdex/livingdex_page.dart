@@ -1,24 +1,36 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../livingdex/catalogo.dart';
+import '../../livingdex/exportacao_dex.dart';
 import '../../providers.dart';
 import 'carga_prints_page.dart';
+import '../backup_page.dart';
+import 'estatisticas_dex_page.dart';
 import 'miniatura.dart';
+import 'tipo_chip.dart';
 import 'validacao_page.dart';
 import 'pokemon_dex_page.dart';
 
 /// LivingDex: todos os Pokémon em ordem de Pokédex (lista) ou nas caixas
 /// do HOME (grade 6 × 5, regular à esquerda e shiny à direita).
 class LivingDexPage extends ConsumerStatefulWidget {
-  const LivingDexPage({super.key});
+  const LivingDexPage({super.key, this.filtroInicial});
+
+  /// Abre a lista já filtrada (ex.: vindo das estatísticas).
+  final FiltroDex? filtroInicial;
 
   @override
   ConsumerState<LivingDexPage> createState() => _LivingDexPageState();
 }
 
 class _LivingDexPageState extends ConsumerState<LivingDexPage> {
-  FiltroDex _filtro = const FiltroDex();
+  late FiltroDex _filtro = widget.filtroInicial ?? const FiltroDex();
   bool _caixas = false;
   int _caixaAtual = 0;
   var _paginas = PageController();
@@ -87,6 +99,50 @@ class _LivingDexPageState extends ConsumerState<LivingDexPage> {
               _caixas = !_caixas;
             }),
           ),
+          PopupMenuButton<String>(
+            onSelected: (op) async {
+              switch (op) {
+                case 'estatisticas':
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const EstatisticasDexPage(),
+                    ),
+                  );
+                case 'exportar':
+                  await _exportar();
+                case 'backup':
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const BackupPage()),
+                  );
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'estatisticas',
+                child: ListTile(
+                  leading: Icon(Icons.insights_outlined),
+                  title: Text('Estatísticas'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'exportar',
+                child: ListTile(
+                  leading: Icon(Icons.table_view),
+                  title: Text('Exportar planilha (.csv)'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'backup',
+                child: ListTile(
+                  leading: Icon(Icons.backup_outlined),
+                  title: Text('Backup completo'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: catalogo.when(
@@ -123,6 +179,34 @@ class _LivingDexPageState extends ConsumerState<LivingDexPage> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// Planilha com a LivingDex inteira (regular e shiny), para abrir no
+  /// Sheets/Excel e filtrar o que falta.
+  Future<void> _exportar() async {
+    final cat = ref.read(catalogoDexProvider).value;
+    if (cat == null) return;
+    final csv = gerarCsvDex(
+      cat,
+      tenho: ref.read(dexTenhoProvider).value ?? const <String>{},
+      ajustes: ref.read(dexAjustesProvider).value ?? const <int, bool>{},
+    );
+    // BOM para o Excel reconhecer acentos.
+    final bytes = utf8.encode('\uFEFF$csv');
+    final carimbo = DateFormat('yyyy-MM-dd_HHmm').format(DateTime.now());
+    final destino = await FilePicker.saveFile(
+      dialogTitle: 'Exportar LivingDex',
+      fileName: 'livingdex_$carimbo.csv',
+      bytes: Uint8List.fromList(bytes),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          destino == null ? 'Exportação cancelada.' : 'LivingDex exportada.',
+        ),
       ),
     );
   }
@@ -261,11 +345,19 @@ class _VisaoLista extends ConsumerWidget {
                 rotulo: 'Tipo',
                 valor: filtro.tipo,
                 opcoes: [for (final t in catalogo.tipos) (t, t)],
+                icone: (t) => TipoChip(t),
                 onChanged: (t) => onFiltro(filtro.copiar(tipo: () => t)),
               ),
               const SizedBox(width: 6),
+              _Escolha<int>(
+                rotulo: 'Geração',
+                valor: filtro.geracao,
+                opcoes: [for (final (g, _, _) in geracoes) (g, nomeGeracao(g))],
+                onChanged: (g) => onFiltro(filtro.copiar(geracao: () => g)),
+              ),
+              const SizedBox(width: 6),
               _Escolha<JogoDex>(
-                rotulo: 'Pode ir para',
+                rotulo: 'Encontrado em',
                 valor: filtro.jogo,
                 opcoes: [for (final j in JogoDex.values) (j, j.rotulo)],
                 onChanged: (j) => onFiltro(filtro.copiar(jogo: () => j)),
@@ -296,11 +388,14 @@ class _VisaoLista extends ConsumerWidget {
                             ? TextStyle(color: cores.outline)
                             : null,
                       ),
-                      subtitle: Text(
-                        bloqueado
-                            ? '${p.numero} · Shiny não disponível'
-                            : '${p.numero} · ${p.tipos.join(' / ')}',
-                      ),
+                      subtitle: bloqueado
+                          ? Text('${p.numero} · Shiny não disponível')
+                          : Row(
+                              children: [
+                                Text('${p.numero}  '),
+                                Flexible(child: TiposDex(p.tipos)),
+                              ],
+                            ),
                       trailing: bloqueado
                           ? Icon(Icons.block, color: cores.outline)
                           : IconButton(
@@ -331,12 +426,16 @@ class _Escolha<T> extends StatelessWidget {
     required this.valor,
     required this.opcoes,
     required this.onChanged,
+    this.icone,
   });
 
   final String rotulo;
   final T? valor;
   final List<(T, String)> opcoes;
   final ValueChanged<T?> onChanged;
+
+  /// Mostra a opção como um widget (ex.: selo do tipo) no lugar do texto.
+  final Widget Function(T)? icone;
 
   @override
   Widget build(BuildContext context) {
@@ -364,7 +463,12 @@ class _Escolha<T> extends StatelessWidget {
                 ),
                 for (final (v, r) in opcoes)
                   ListTile(
-                    title: Text(r),
+                    title: icone == null
+                        ? Text(r)
+                        : Align(
+                            alignment: Alignment.centerLeft,
+                            child: icone!(v),
+                          ),
                     selected: v == valor,
                     onTap: () => Navigator.pop(ctx, (v,)),
                   ),

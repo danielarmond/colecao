@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../livingdex/catalogo.dart';
 import '../../providers.dart';
 import 'miniatura.dart';
+import 'tipo_chip.dart';
 
 /// Tela de um Pokémon: o que você tem, onde fica na caixa e os dados gerais.
 class PokemonDexPage extends ConsumerWidget {
@@ -135,9 +136,13 @@ class PokemonDexPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            '${p.numero} · ${p.tipos.join(' / ')}',
-            style: texto.titleMedium,
+          Row(
+            children: [
+              Text('${p.numero}  ', style: texto.titleMedium),
+              TiposDex(p.tipos, pequeno: false),
+              const Spacer(),
+              Text(nomeGeracao(p.geracao), style: texto.bodySmall),
+            ],
           ),
           const SizedBox(height: 12),
           Row(
@@ -179,19 +184,29 @@ class PokemonDexPage extends ConsumerWidget {
               ),
             ),
           const SizedBox(height: 20),
-          Text('Pode ir para (HOME)', style: texto.titleSmall),
+          Text('Na Pokédex dos jogos do Switch', style: texto.titleSmall),
           const SizedBox(height: 6),
           if (p.jogos.isEmpty)
-            const Text('Nenhum dos jogos atuais.')
+            const Text('Em nenhum: eventos, jogos antigos ou o GO.')
           else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final j in JogoDex.values)
-                  if (p.jogos.contains(j)) Chip(label: Text(j.rotulo)),
-              ],
-            ),
+            for (final j in JogoDex.values)
+              if (p.jogos.contains(j))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 130,
+                        child: Text(j.rotulo, style: texto.labelLarge),
+                      ),
+                      Text(
+                        p.dexJogos[j] == null
+                            ? 'na Pokédex'
+                            : rotuloDexJogo(j, p.dexJogos[j]!),
+                      ),
+                    ],
+                  ),
+                ),
           const SizedBox(height: 24),
           Row(
             children: [

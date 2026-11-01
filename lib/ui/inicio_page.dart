@@ -40,7 +40,7 @@ class InicioPage extends StatelessWidget {
                   child: _Secao(
                     imagem: 'assets/inicio/livingdex.jpg',
                     alinhamento: Alignment.center,
-                    titulo: 'LivingDex',
+                    titulo: 'Digital',
                     posicao: Alignment(0.85, -1 + _esquerda * 2 + 0.35),
                     degradeParaBaixo: false,
                     onTap: () => _abrir(context, const LivingDexPage()),

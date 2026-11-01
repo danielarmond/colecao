@@ -34,6 +34,8 @@ class PokemonDex {
     required this.status,
     required this.jogos,
     required this.shinyBloqueado,
+    this.dexJogos = const {},
+    this.lendario = false,
   });
 
   factory PokemonDex.fromJson(Map<String, dynamic> j) => PokemonDex(
@@ -53,6 +55,12 @@ class PokemonDex {
             .whereType<JogoDex>()
             .toSet(),
         shinyBloqueado: j['shinyBloqueado'] as bool? ?? false,
+        lendario: j['lendario'] as bool? ?? false,
+        dexJogos: {
+          for (final e in ((j['dexJogos'] as Map?) ?? const {}).entries)
+            if (JogoDex.deCodigo(e.key as String) != null)
+              JogoDex.deCodigo(e.key as String)!: e.value as String,
+        },
       );
 
   /// Id da PokéAPI (formas regionais têm ids acima de 10000).
@@ -78,6 +86,22 @@ class PokemonDex {
 
   /// Shiny indisponível segundo o catálogo (você pode ajustar no app).
   final bool shinyBloqueado;
+
+  /// Número na Pokédex de cada jogo do Switch, como na planilha de origem
+  /// (ex.: SV "K194", SwSh "A068"). Ver [rotuloDexJogo].
+  final Map<JogoDex, String> dexJogos;
+
+  /// Lendário ou mítico (pela espécie).
+  final bool lendario;
+
+  /// Geração em que esta entrada surgiu: a da espécie, ou a da forma
+  /// regional (Alola 7, Galar e Hisui 8, Paldea 9).
+  int get geracao => switch (regiao) {
+        'alola' => 7,
+        'galar' || 'hisui' => 8,
+        'paldea' => 9,
+        _ => geracaoDoNumero(dex),
+      };
 
   bool get regional => regiao != null;
 
@@ -106,6 +130,50 @@ class PokemonDex {
   String get urlBulbapedia =>
       'https://bulbapedia.bulbagarden.net/wiki/'
       '${Uri.encodeComponent(especie.replaceAll(' ', '_'))}_(Pok%C3%A9mon)';
+}
+
+/// Gerações pelo número da Pokédex nacional.
+const geracoes = <(int numero, String nome, int ultimo)>[
+  (1, 'Kanto', 151),
+  (2, 'Johto', 251),
+  (3, 'Hoenn', 386),
+  (4, 'Sinnoh', 493),
+  (5, 'Unova', 649),
+  (6, 'Kalos', 721),
+  (7, 'Alola', 809),
+  (8, 'Galar', 905),
+  (9, 'Paldea', 1025),
+];
+
+int geracaoDoNumero(int dex) {
+  for (final (n, _, ultimo) in geracoes) {
+    if (dex <= ultimo) return n;
+  }
+  return geracoes.last.$1;
+}
+
+String nomeGeracao(int g) => 'Gen $g (${geracoes[g - 1].$2})';
+
+/// Texto da Pokédex de um jogo: "Kitakami #194", "Isle of Armor #68"…
+String rotuloDexJogo(JogoDex jogo, String valor) {
+  final letra = valor.isEmpty ? '' : valor[0];
+  final numero = int.tryParse(valor.replaceAll(RegExp(r'[^0-9]'), ''));
+  final n = numero == null ? '' : ' #$numero';
+  return switch (jogo) {
+    JogoDex.swsh => switch (letra) {
+        'A' => 'Isle of Armor$n',
+        'C' => 'Crown Tundra$n',
+        _ => 'Galar$n',
+      },
+    JogoDex.sv => switch (letra) {
+        'K' => 'Kitakami$n',
+        'B' => 'Blueberry$n',
+        _ => 'Paldea$n',
+      },
+    JogoDex.bdsp => 'Pokédex$n',
+    JogoDex.pla => 'Hisui$n',
+    JogoDex.za => 'Lumiose$n',
+  };
 }
 
 /// Uma caixa do HOME na organização da sua living dex: 15 Pokémon, cada um
@@ -201,6 +269,8 @@ class FiltroDex {
     this.posse = PosseDex.todos,
     this.tipo,
     this.jogo,
+    this.geracao,
+    this.semLendarios = false,
     this.busca = '',
   });
 
@@ -208,6 +278,10 @@ class FiltroDex {
   final PosseDex posse;
   final String? tipo;
   final JogoDex? jogo;
+  final int? geracao;
+
+  /// Esconde lendários e míticos.
+  final bool semLendarios;
   final String busca;
 
   FiltroDex copiar({
@@ -215,6 +289,8 @@ class FiltroDex {
     PosseDex? posse,
     String? Function()? tipo,
     JogoDex? Function()? jogo,
+    int? Function()? geracao,
+    bool? semLendarios,
     String? busca,
   }) =>
       FiltroDex(
@@ -222,6 +298,8 @@ class FiltroDex {
         posse: posse ?? this.posse,
         tipo: tipo == null ? this.tipo : tipo(),
         jogo: jogo == null ? this.jogo : jogo(),
+        geracao: geracao == null ? this.geracao : geracao(),
+        semLendarios: semLendarios ?? this.semLendarios,
         busca: busca ?? this.busca,
       );
 }
@@ -242,6 +320,8 @@ List<PokemonDex> filtrarDex(
     for (final p in catalogo.pokemon)
       if ((f.tipo == null || p.tipos.contains(f.tipo)) &&
           (f.jogo == null || p.jogos.contains(f.jogo)) &&
+          (f.geracao == null || p.geracao == f.geracao) &&
+          !(f.semLendarios && p.lendario) &&
           (busca.isEmpty ||
               (numero != null
                   ? p.dex == numero
@@ -271,4 +351,61 @@ List<PokemonDex> filtrarDex(
     if (tenho.contains(chaveDex(p.id, shiny: shiny))) meus++;
   }
   return (tenho: meus, total: total);
+}
+
+/// Tem e falta de uma variante, por grupo (geração, tipo…).
+typedef ContagemDex = ({int tenho, int total});
+
+/// Progresso de uma variante em cada geração (1 a 9).
+Map<int, ContagemDex> progressoPorGeracao(
+  CatalogoDex catalogo, {
+  required bool shiny,
+  required Set<String> tenho,
+  required Map<int, bool> ajustes,
+  bool semLendarios = false,
+}) {
+  final m = {for (final (g, _, _) in geracoes) g: (tenho: 0, total: 0)};
+  for (final p in catalogo.pokemon) {
+    if (semLendarios && p.lendario) continue;
+    if (shiny && shinyBloqueado(p, ajustes)) continue;
+    final c = m[p.geracao]!;
+    m[p.geracao] = (
+      tenho: c.tenho + (tenho.contains(chaveDex(p.id, shiny: shiny)) ? 1 : 0),
+      total: c.total + 1,
+    );
+  }
+  return m;
+}
+
+/// Quantos dos que faltam (na variante) aparecem na Pokédex de cada jogo
+/// do Switch, e quantos não aparecem em nenhum.
+({
+  Map<JogoDex, int> porJogo,
+  int faltam,
+  int emNenhum,
+}) faltamPorJogo(
+  CatalogoDex catalogo, {
+  required bool shiny,
+  required Set<String> tenho,
+  required Map<int, bool> ajustes,
+  bool semLendarios = false,
+}) {
+  final porJogo = {for (final j in JogoDex.values) j: 0};
+  var faltam = 0;
+  var emNenhum = 0;
+  for (final p in catalogo.pokemon) {
+    if (semLendarios && p.lendario) continue;
+    if (shiny && shinyBloqueado(p, ajustes)) continue;
+    if (tenho.contains(chaveDex(p.id, shiny: shiny))) continue;
+    faltam++;
+    if (p.jogos.isEmpty) emNenhum++;
+    for (final j in p.jogos) {
+      porJogo[j] = porJogo[j]! + 1;
+    }
+  }
+  return (
+    porJogo: porJogo,
+    faltam: faltam,
+    emNenhum: emNenhum,
+  );
 }

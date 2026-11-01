@@ -2,8 +2,13 @@
 
 Uso: python tool/livingdex/gerar_catalogo.py PASTA_CSV assets/livingdex/catalogo.json
 PASTA_CSV = data/v2/csv do repositório PokeAPI/pokeapi.
+
+Os jogos do Switch em que cada Pokémon aparece (e o número na Pokédex de
+cada jogo) vêm de tool/livingdex/jogos_switch.csv, extraído da planilha
+"HOME Living Dex Organizer" (extrair_jogos_switch.py). Para Legends Z-A,
+soma-se a Pokédex da DLC (hyperspace) da PokéAPI.
 """
-import csv, json, sys, datetime
+import csv, json, os, sys, datetime
 from collections import defaultdict
 
 src, out = sys.argv[1], sys.argv[2]
@@ -50,18 +55,55 @@ SHINY_BLOQ = {494, 647, 648, 720, 721, 789, 790, 801, 802, 890, 891, 892, 893, 8
               905, 1001, 1002, 1003, 1004, 1007, 1008, 1009, 1010, 1014, 1015, 1016, 1017, 1020, 1021,
               1022, 1023, 1024, 1025}
 
-# Formas que mudam o tipo e ficam guardadas no HOME (sem depender de item
-# ou de batalha). Entram nas caixas de formas, junto com as regionais.
-ALTERNATIVAS = {
-    'wormadam-sandy', 'wormadam-trash', 'shaymin-sky',
-    'rotom-heat', 'rotom-wash', 'rotom-frost', 'rotom-fan', 'rotom-mow',
-    'hoopa-unbound', 'oricorio-pom-pom', 'oricorio-pau', 'oricorio-sensu',
-    'necrozma-dusk', 'necrozma-dawn', 'urshifu-rapid-strike',
-    'calyrex-ice', 'calyrex-shadow',
-}
+# Formas que mudam o tipo e são permanentes (definidas na evolução, sem
+# como voltar). Formas reversíveis (Rotom, Shaymin, Hoopa, Oricorio,
+# Necrozma, Calyrex…) ficam de fora. Entram nas caixas de formas.
+ALTERNATIVAS = {'wormadam-sandy', 'wormadam-trash', 'urshifu-rapid-strike'}
 
 # Formas com shiny indisponível mesmo quando a espécie tem (por id da PokéAPI).
 SHINY_BLOQ_IDS = {10272}  # Bloodmoon Ursaluna
+
+
+# Planilha de jogos do Switch: (dex, forma) -> {jogo: número na Pokédex}.
+JOGOS_PLANILHA = ['swsh', 'bdsp', 'pla', 'sv', 'lza']
+_planilha_padrao = {}
+_planilha_formas = {}
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jogos_switch.csv'),
+          encoding='utf-8') as f:
+    for r in csv.DictReader(f):
+        valores = {g: r[g] for g in JOGOS_PLANILHA}
+        d = int(r['dex'])
+        if r['indice_forma'] == '':
+            _planilha_padrao.setdefault(d, valores)
+        _planilha_formas[(d, r['forma'].strip().lower())] = valores
+
+# Nome da forma na planilha, pelo identificador da PokéAPI.
+FORMA_NA_PLANILHA = {
+    'tauros-paldea-combat-breed': 'paldean combat breed',
+    'tauros-paldea-blaze-breed': 'paldean blaze breed',
+    'tauros-paldea-aqua-breed': 'paldean aqua breed',
+    'basculin-white-striped': 'white stripe',
+    'ursaluna-bloodmoon': 'bloodmoon',
+    'wormadam-sandy': 'sandy',
+    'wormadam-trash': 'trash',
+    'urshifu-rapid-strike': 'rapid strike',
+}
+SUFIXO_REGIAO = {'alola': 'alolan', 'galar': 'galarian', 'hisui': 'hisuian', 'paldea': 'paldean'}
+
+
+def dados_planilha(ident, especie, reg, padrao):
+    if padrao:
+        return _planilha_padrao.get(especie)
+    forma = FORMA_NA_PLANILHA.get(ident) or SUFIXO_REGIAO.get(reg)
+    return _planilha_formas.get((especie, forma)) if forma else None
+
+
+_especies = {int(r['id']): r for r in ler('pokemon_species')}
+
+
+def lendario(especie):
+    e = _especies[especie]
+    return e['is_legendary'] == '1' or e['is_mythical'] == '1'
 
 
 def regiao(ident):
@@ -111,6 +153,21 @@ for p in pokemon:
         fn = form_names.get(form_por_pokemon.get(p['id'], ''), {})
         nome = (fn.get('pokemon_name') or f"{nome_especie} ({reg.capitalize()})").replace('Standard ', '')
     st = pstats[p['id']]
+    # Jogos: planilha + Pokédex da PokéAPI. Sem linha na planilha, fica a
+    # regra antiga (Pokédex regionais da PokéAPI).
+    antigos = extra[1] if extra else jogos(especie, reg)
+    pl = dados_planilha(ident, especie, reg, padrao)
+    if pl is None:
+        jogos_finais = antigos
+        dex_jogos = {}
+    else:
+        dex_jogos = {('za' if g == 'lza' else g): v for g, v in pl.items() if v}
+        # Espécie: soma as Pokédex da PokéAPI (cobre lacunas da planilha),
+        # menos BD/SP, onde a regra antiga (até #493) era grosseira.
+        # Forma: a planilha decide, só somando a DLC de Z-A.
+        extras = set(antigos) - {'bdsp'} if padrao else {'za'} & set(antigos)
+        conj = set(dex_jogos) | extras
+        jogos_finais = [j for j in ['swsh', 'bdsp', 'pla', 'sv', 'za'] if j in conj]
     saida.append({
         'id': int(p['id']),
         'dex': especie,
@@ -122,7 +179,9 @@ for p in pokemon:
         'habilidades': [n for n, h in pab[p['id']] if not h],
         'habilidadeOculta': next((n for n, h in pab[p['id']] if h), None),
         'status': [st.get(i, 0) for i in range(1, 7)],
-        'jogos': extra[1] if extra else jogos(especie, reg),
+        'jogos': jogos_finais,
+        'dexJogos': dex_jogos,
+        'lendario': lendario(especie),
         'shinyBloqueado': especie in SHINY_BLOQ or int(p['id']) in SHINY_BLOQ_IDS,
     })
 

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:colecao/livingdex/catalogo.dart';
+import 'package:colecao/livingdex/exportacao_dex.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -11,9 +12,10 @@ void main() {
 
   test('catálogo: 1025 espécies e as formas', () {
     expect(cat.nacionais, hasLength(1025));
-    expect(cat.formas, hasLength(76));
+    expect(cat.formas, hasLength(62));
     expect(porNome('Rapid Strike Urshifu').tipos, ['Fighting', 'Water']);
     expect(porNome('Rapid Strike Urshifu').shinyBloqueado, isTrue);
+    expect(cat.pokemon.where((p) => p.especie == 'Rotom'), hasLength(1));
     expect(cat.nacionais.first.nome, 'Bulbasaur');
     expect(cat.nacionais.last.dex, 1025);
     expect(porNome('Alolan Vulpix').tipos, ['Ice']);
@@ -31,10 +33,10 @@ void main() {
 
   test('caixas seguem a organização do HOME (15 por caixa)', () {
     expect(cat.caixas.first.nome, 'Dex 1-15');
-    expect(cat.caixas, hasLength(69 + 6));
+    expect(cat.caixas, hasLength(69 + 5));
     final c = cat.caixas.firstWhere((c) => c.nome == 'Dex 796-810');
     expect(c.pokemon, hasLength(15));
-    expect(cat.caixas.last.nome, 'Formas 6');
+    expect(cat.caixas.last.nome, 'Formas 5');
   });
 
   test('posição: Rillaboom regular e shiny lado a lado', () {
@@ -75,7 +77,7 @@ void main() {
 
     final reg =
         progressoDex(cat, shiny: false, tenho: tenho, ajustes: const {});
-    expect(reg, (tenho: 1, total: 1101));
+    expect(reg, (tenho: 1, total: 1087));
   });
 
   test('links do Serebii e da Bulbapedia', () {
@@ -84,4 +86,61 @@ void main() {
     expect(porNome('Pikachu').urlBulbapedia,
         'https://bulbapedia.bulbagarden.net/wiki/Pikachu_(Pok%C3%A9mon)');
   });
+
+  test('geração, Pokédex dos jogos e estatísticas', () {
+    expect(porNome('Bulbasaur').geracao, 1);
+    expect(porNome('Pecharunt').geracao, 9);
+    expect(porNome('Alolan Vulpix').geracao, 7); // forma: geração da região
+    expect(porNome('Hisuian Growlithe').geracao, 8);
+    expect(porNome('Paldean Wooper').geracao, 9);
+    expect(porNome('Sandy Wormadam').geracao, 4);
+    expect(nomeGeracao(4), 'Gen 4 (Sinnoh)');
+    expect(porNome('Bloodmoon Ursaluna').dexJogos[JogoDex.sv], 'K196');
+    expect(rotuloDexJogo(JogoDex.sv, 'K196'), 'Kitakami #196');
+    expect(rotuloDexJogo(JogoDex.swsh, 'A068'), 'Isle of Armor #68');
+    expect(porNome('Celebi').jogos, isEmpty);
+
+    final porGen = progressoPorGeracao(cat,
+        shiny: false, tenho: const {}, ajustes: const {});
+    expect(porGen.values.fold<int>(0, (a, c) => a + c.total), 1087);
+    expect(porGen[1]!.total, 151);
+
+    expect(porNome('Mewtwo').lendario, isTrue);
+    expect(porNome('Celebi').lendario, isTrue); // mítico
+    expect(porNome('Pikachu').lendario, isFalse);
+    final semL = progressoPorGeracao(cat,
+        shiny: false, tenho: const {}, ajustes: const {}, semLendarios: true);
+    expect(semL[1]!.total, 151 - 5); // Articuno, Zapdos, Moltres, Mewtwo, Mew
+
+    final pika = porNome('Pikachu');
+    final r = faltamPorJogo(cat,
+        shiny: false,
+        tenho: {chaveDex(pika.id, shiny: false)},
+        ajustes: const {});
+    expect(r.faltam, 1086);
+    expect(r.emNenhum, greaterThan(0));
+    expect(r.porJogo[JogoDex.sv], greaterThan(600));
+
+    expect(
+        filtrarDex(cat, const FiltroDex(semLendarios: true),
+                tenho: const {}, ajustes: const {})
+            .any((p) => p.lendario),
+        isFalse);
+
+    final filtrados = filtrarDex(cat, const FiltroDex(geracao: 2),
+        tenho: const {}, ajustes: const {});
+    expect(filtrados.every((p) => p.geracao == 2), isTrue);
+    expect(filtrados.first.nome, 'Chikorita');
+  });
+
+  test('planilha da LivingDex', () {
+    final csv = gerarCsvDex(cat,
+        tenho: {chaveDex(porNome('Bulbasaur').id, shiny: false)},
+        ajustes: const {});
+    final linhas = csv.split('\r\n');
+    expect(linhas.first, startsWith('numero,nome,especie,forma,geracao'));
+    expect(linhas[1], startsWith('1,Bulbasaur,Bulbasaur,,1,Grass,Poison,tenho,falta,Dex 1-15,L1C1,L1C2'));
+    expect(linhas.where((l) => l.isNotEmpty), hasLength(1088));
+  });
 }
+
